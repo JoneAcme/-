@@ -18,6 +18,7 @@ Git 笔记
 | git log             | 查看提交log                                                  |
 | git add             | 添加文件 后接文件名 或者. （添加目录下所有文件）             |
 | git reset --hard    | 清除缓存区的操作                                             |
+|git reset --soft HEAD^|撤回上一次commit                                           |
 | git commit -m'描述' | 提交文件到本地仓库                                           |
 | git branch          | 查看本地分支  -v  -av                                        |
 | git checkout XXX    | 取出、切换到XXX分支、（-b nameA） 创建新分支A、（-b nameA nameB） 基于分支B创建分支A |
