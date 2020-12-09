@@ -2,7 +2,7 @@ Git 笔记
 
 
 
-[toc]
+[TOC]
 
 
 
@@ -41,7 +41,7 @@ Git 笔记
 
 
 
-## 一些常见操作
+## 基本操作
 
 ### 配置
 
@@ -223,6 +223,72 @@ checkout <commitId>
 
 
 
+
+
+## 常见合并等操作
+
+### 合并commit
+
+1. git rebase -i head~3   编辑最新的3条提交记录
+
+2. 此时会进入一个编辑界面, 显示最近3条记录, 默认是 pick 操作 ，改为 squash 操作
+
+3. 如果合并成功会打开另外一个文件文件，在这里我们输入这次合并时的提交记录信息。
+
+   如果合并有冲突，在解决冲突后需要输入：
+
+   git add .
+
+   如果不想合并了，放弃合并的指令是：
+
+   git rebase --abort
+
+4. 到这一步，本地commit合并已完成
+
+5. 会有提示pull 一次，不可pull ！！ 否则合并无效，还会产生新的commit。
+
+6. 合并完成后，如果需要同步到远程，远程的也合并， -f 强制提交，注意：可能会覆盖其他人代码
+
+   执行：git push -f   /  push到远程dev_test 分支： git push origin dev_test -f 
+
+7. 查看log ，本地远程commit 都已经合并
+
+
+
+### rebease 中的操作及其含义
+
+```
+	# 命令:
+# p, pick <提交> = 使用提交
+# r, reword <提交> = 使用提交，但修改提交说明
+# e, edit <提交> = 使用提交，进入 shell 以便进行提交修补
+# s, squash <提交> = 使用提交，但融合到前一个提交
+# f, fixup <提交> = 类似于 "squash"，但丢弃提交说明日志
+# x, exec <命令> = 使用 shell 运行命令（此行剩余部分）
+# b, break = 在此处停止（使用 'git rebase --continue' 继续变基）
+# d, drop <提交> = 删除提交
+# l, label <label> = 为当前 HEAD 打上标记
+# t, reset <label> = 重置 HEAD 到该标记
+# m, merge [-C <commit> | -c <commit>] <label> [# <oneline>]
+# .       创建一个合并提交，并使用原始的合并提交说明（如果没有指定
+# .       原始提交，使用注释部分的 oneline 作为提交说明）。使用
+# .       -c <提交> 可以编辑提交说明。
+#
+# 可以对这些行重新排序，将从上至下执行。
+#
+# 如果您在这里删除一行，对应的提交将会丢失。
+```
+
+
+
+### 合并一个commit 到当前分支
+
+```shell
+git cherry-pick <commitId>
+```
+
+
+
 ## 常用Linux 命令 todo
 
 | 命令    | 作用                                                |
@@ -237,4 +303,8 @@ checkout <commitId>
 | i       | 编辑文本                                            |
 | dd      | 删除行                                              |
 | pwd     | 当前目录的全路径                                    |
+
+
+
+
 
