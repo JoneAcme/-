@@ -294,6 +294,18 @@ git cherry-pick <commitId>
  git cherry-pick [start-commitID]..[end-commitID] 提取一个commit到另一个commit之间的所以commit，不包括start-commitID，包括end-commitID。 
  
  git cherry-pick start-commitID]^..[end-commitID] 提取一个commit到另一个commit之间的所有commit，包括start-commitID，包括end-commitID。
+ 
+### git push 多个commit中的一个
+
+git push [remote] [commit-id]:[branch]
+
+### 将自己分支以未跟踪状态合并到新分支
+
+通常我们会在自己分支开发功能，可能会产生大量的commit，当需要合并到dev时，把自己分支所有改动一次性全部以未跟踪的方式抓到dev可以使用。先切到dev分支并更新。
+
+```
+git merge [your branch] --squash
+```
 
 ## 常用Linux 命令 todo
 
