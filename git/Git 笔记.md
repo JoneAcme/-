@@ -115,6 +115,8 @@ git config --global user.email 'email'
 
 `git rebase`
 
+如果你的当前分支落后于远程分支，并且你有了自己新的commit，使用git pull会产生一个merge的commit信息。如果使用git pull --rebase，那么会git会将你的commit先放一边，然后把远程分支的内容拉取到你的本地，接着再自动把你的commit放在最上面。中途发生冲突，在解决冲突后使用git rebase --continue来继续rebase操作
+
 - -i  <commitId>： 基于要修改的commit 父亲去修改，
 
   修改历史提交描述：
