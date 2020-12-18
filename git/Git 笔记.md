@@ -103,7 +103,6 @@ git config --global user.email 'email'
 - -D：强制删除分支
 
 
-
 ### commit
 
 `git commit`
@@ -306,6 +305,9 @@ git push [remote] [commit-id]:[branch]
 ```
 git merge [your branch] --squash
 ```
+
+### 删除远程分支
+git push -d origin branchName
 
 ## 常用Linux 命令 todo
 
