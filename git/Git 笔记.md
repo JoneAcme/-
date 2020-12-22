@@ -23,6 +23,7 @@ Git 笔记
 | git branch          | 查看本地分支  -v  -av                                        |
 | git checkout XXX    | 取出、切换到XXX分支、（-b nameA） 创建新分支A、（-b nameA nameB） 基于分支B创建分支A |
 | git diff            | git diff <commitIdA> <commitIdB> 两次提交的不同              |
+| git branch -vv      | 查看本地分支对应的远程分支              |
 | git stash           | 将当前的修改暂存起来，工作区与暂存区恢复到HEAD               |
 | git stash apply     | 取出stash 最上层的一条恢复到工作区，但是不会从stash list移除对应记录 |
 | git stash pop       | 取出stash 最上层的一条恢复到工作区，并移除 stash list中对应记录 |
