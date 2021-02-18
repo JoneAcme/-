@@ -17,6 +17,7 @@ Git 笔记
 | git status          | 查看当前状态                                                 |
 | git log             | 查看提交log                                                  |
 | git add             | 添加文件 后接文件名 或者. （添加目录下所有文件）             |
+| git restore --staged <文件>...       | 取消暂存 |
 | git reset --hard    | 清除缓存区的操作                                             |
 |git reset --soft HEAD^|撤回上一次commit                                           |
 | git commit -m'描述' | 提交文件到本地仓库                                           |
@@ -27,6 +28,7 @@ Git 笔记
 | git stash           | 将当前的修改暂存起来，工作区与暂存区恢复到HEAD               |
 | git stash apply     | 取出stash 最上层的一条恢复到工作区，但是不会从stash list移除对应记录 |
 | git stash pop       | 取出stash 最上层的一条恢复到工作区，并移除 stash list中对应记录 |
+
 
 
 
