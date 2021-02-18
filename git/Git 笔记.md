@@ -28,8 +28,7 @@ Git 笔记
 | git stash           | 将当前的修改暂存起来，工作区与暂存区恢复到HEAD               |
 | git stash apply     | 取出stash 最上层的一条恢复到工作区，但是不会从stash list移除对应记录 |
 | git stash pop       | 取出stash 最上层的一条恢复到工作区，并移除 stash list中对应记录 |
-
-
+| git branch --set-upstream-to origin/xxx       | 将当前分支关联到远程xxx分支 |
 
 
 ### 日志常用操作
