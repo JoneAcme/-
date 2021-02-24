@@ -225,6 +225,7 @@ checkout <commitId>
 ### 恢复文件
 
 
+## remote
 
 
 
@@ -310,6 +311,10 @@ git merge [your branch] --squash
 
 ### 删除远程分支
 git push -d origin branchName
+
+
+
+
 
 ## 常用Linux 命令 todo
 
