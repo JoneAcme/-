@@ -24,6 +24,7 @@ Git 笔记
 | git branch          | 查看本地分支  -v  -av                                        |
 | git checkout XXX    | 取出、切换到XXX分支、（-b nameA） 创建新分支A、（-b nameA nameB） 基于分支B创建分支A |
 | git diff            | git diff <commitIdA> <commitIdB> 两次提交的不同              |
+| git pull --rebase | 把远程分支的内容拉取到本地，接着再自动本地commit放在最上面。如有冲突，解决冲突后使用git rebase --continue来继续rebase操作 |
 | git branch -vv      | 查看本地分支对应的远程分支              |
 | git stash           | 将当前的修改暂存起来，工作区与暂存区恢复到HEAD               |
 | git stash apply     | 取出stash 最上层的一条恢复到工作区，但是不会从stash list移除对应记录 |
@@ -101,6 +102,8 @@ git config --global user.email 'email'
 
 - --v ：查看分支，详细信息，仅本地
 - -av  ：查看分支，详细信息，本地+远程
+- -r ：查看远程分支
+- -a：查看所有分支
 - -d ：删除分支
 - -D：强制删除分支
 
@@ -116,7 +119,7 @@ git config --global user.email 'email'
 
 `git rebase`
 
-如果你的当前分支落后于远程分支，并且你有了自己新的commit，使用git pull会产生一个merge的commit信息。如果使用git pull --rebase，那么会git会将你的commit先放一边，然后把远程分支的内容拉取到你的本地，接着再自动把你的commit放在最上面。中途发生冲突，在解决冲突后使用git rebase --continue来继续rebase操作
+**如果你的当前分支落后于远程分支，并且你有了自己新的commit，使用git pull会产生一个merge的commit信息。如果使用git pull --rebase，那么会git会将你的commit先放一边，然后把远程分支的内容拉取到你的本地，接着再自动把你的commit放在最上面。中途发生冲突，在解决冲突后使用git rebase --continue来继续rebase操作**
 
 - -i  <commitId>： 基于要修改的commit 父亲去修改，
 
@@ -155,6 +158,28 @@ git config --global user.email 'email'
 恢复暂存区文件到工作区：
 
 git checkout -- <文件名>
+
+### remote
+
+| 命令                           | 描述                                                      |
+| ------------------------------ | --------------------------------------------------------- |
+| git remote                     | 列出所有远程主机 （使用`-v`选项，可以参看远程主机的网址） |
+| git remote show <主机名>       | 查看该主机的详细信息                                      |
+| git remote add <主机名> <网址> | 添加远程主机                                              |
+| git remote rm <主机名>         | 删除远程主机                                              |
+| git remote rename              | 远程主机改名                                              |
+
+### fetch
+
+`git fetch <远程主机名>` ： 将某个远程主机的更新，全部取回本地
+
+然后使用merge 或者 rebase 合并到当前分支
+
+```
+git merge <远程主机名>/<分支名>  
+或者
+git rebase <远程主机名>/<分支名>  
+```
 
 
 
@@ -225,9 +250,6 @@ checkout <commitId>
 ### 恢复文件
 
 
-## remote
-
-
 
 ## 常见合并等操作
 
@@ -292,11 +314,11 @@ git cherry-pick <commitId>
 ```
 
  git cherry-pick [commitID] 提取一个commit 
- 
+
  git cherry-pick [start-commitID]..[end-commitID] 提取一个commit到另一个commit之间的所以commit，不包括start-commitID，包括end-commitID。 
- 
+
  git cherry-pick start-commitID]^..[end-commitID] 提取一个commit到另一个commit之间的所有commit，包括start-commitID，包括end-commitID。
- 
+
 ### git push 多个commit中的一个
 
 git push [remote] [commit-id]:[branch]
