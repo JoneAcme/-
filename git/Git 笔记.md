@@ -106,6 +106,7 @@ git config --global user.email 'email'
 - -a：查看所有分支
 - -d ：删除分支
 - -D：强制删除分支
+- git push origin --delete XXX ： 删除远程分支
 
 
 ### commit
