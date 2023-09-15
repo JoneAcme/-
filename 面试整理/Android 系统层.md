@@ -248,7 +248,7 @@ Zygote进程启动好服务端socket后，便会等待AMS的socket请求，来�
 
 1. **Zygote的跨进程通信没有使用binder，而是socket，所以应用程序进程的binder机制不是继承而来，而是进程创建后自己启动的。**
 
-2. **Zygote跨进程通信之所以用socket而不是binder，是因为binder通信是多线程的，而Zygote需要在单线程状态下fork子进程来避免死锁问题。**
+2. **Zygote跨进程通信之所以用socket而不是binder，是因为binder通信是多线程的（多线程程序里不准使用fork），而Zygote需要在单线程状态下fork子进程来避免死锁问题。**[参考链接](https://blog.csdn.net/qq_39037047/article/details/88066589)
 
 3. **PMS、AMS等系统服务启动后会调用ServiceManager.addService()注册，然后运行在自己的工作线程。**
 
@@ -322,8 +322,8 @@ private void attach(boolean system) {
 
 所以对于AMS来说，
 
-1. AMS向Zygote发起启动应用的socket请求，Zygote收到请求fork出进程，返回进程的pid给AMS；
-2. 应用进程启动好后，执行入口main函数，通过attachApplication方法告诉AMS已经启动，同时传入应用进程的binder句柄IApplicationThread。
+1. **AMS向Zygote发起启动应用的socket请求，Zygote收到请求fork出进程，返回进程的pid给AMS；**
+2. **应用进程启动好后，执行入口main函数，通过attachApplication方法告诉AMS已经启动，同时传入应用进程的binder句柄IApplicationThread。**
 
 完成这两步，应用进程的启动过程才算完成。
 
@@ -998,7 +998,7 @@ boolean resumeTopActivityUncheckedLocked(ActivityRecord prev, ActivityOptions op
 
 ```
 
-## 3. onPause()流程发起
+## 3. TopActivity-onPause()流程发起
 
 ```java
 //ActivityStack#resumeTopActivityUncheckedLocked()-> 
@@ -1238,8 +1238,369 @@ final void performCreate(Bundle icicle, PersistableBundle persistentState) {
 
 ## 总结：
 
-1. Activity 发起请求，Binder 到ATMS 处理请求，
-2. 通过ActivityStack、ClientLifecycleManager 发出生命周期的指令，先发起TopActivity的Pause流程
-3.  经由ActivityThread 中的Handler，切换到主线程中，在TransactionExecutor#execute() 中执行Activity的onPause
-4.  同样通过TransactionExecutor#execute() 中执行 由Instrumentation反射创建的新Activity 对象的onCreate
+1. Activity 发起请求，Binder 到ATMS 处理请求，接着就会进行一些校验和判断权限，包括进程检查，intent检查，权限检查等，根据启动模式计算 flag ，设置启动 Activity 的 Task 栈。
+2. 检查要启动的 Activity 进程是否存在，存在则向客户端进程 ApplicationThread 回调启动 Activity，否则就创建进程。
+   1. 进程存在
+      - 通过ActivityStack、ClientLifecycleManager 发出生命周期的指令，先发起TopActivity的Pause流程
+      - 经由ActivityThread 中的Handler，切换到主线程中，在TransactionExecutor#execute() 中执行Activity的onPause
+   2. 进程不存在，通过Zygote fork出应用进程
+3. 通过TransactionExecutor#execute() 中执行 由Instrumentation反射创建的新Activity 对象的onCreate
+
+
+
+# APK打包
+
+APK包含文件：
+
+- AndroidManifest.xml 程序全局配置文件
+- classes.dex Dalvik字节码
+- resources.arsc 资源索引表, 解压缩resources.ap_就能看到
+- res\ 该目录存放资源文件(图片，文本，xml布局)
+- assets\ 该目录可以存放一些配置文件
+- src\ java源码文件
+- libs\ 存放应用程序所依赖的库
+- gen\ 编译器根据资源文件生成的java文件
+- bin\ 由编译器生成的apk文件和各种依赖的资源
+- META-INF\ 该目录下存放的是签名信息
+
+![](https://pic3.zhimg.com/80/v2-2227b8b9b548a55c65cad493319a2d06_1440w.webp)
+
+### **1. 打包资源文件，生成R.java文件**
+
+打包资源的工具是aapt（The Android Asset Packaing Tool）
+
+在这个过程中，项目中的AndroidManifest.xml文件和布局文件XML都会编译，然后生成相应的R.java，另外AndroidManifest.xml会被aapt编译成二进制。
+
+存放在APP的res目录下的资源，该类资源在APP打包前大多会被编译，变成二进制文件，并会为每个该类文件赋予一个resource id。**对于该类资源的访问，应用层代码则是通过resource id进行访问的**。Android应用在编译过程中aapt工具会对资源文件进行编译，并生成一个resource.arsc文件，resource.arsc文件相当于一个文件索引表，记录了很多跟资源相关的信息。
+
+### **2. 处理aidl文件，生成相应的.Java文件**
+
+这一过程中使用到的工具是aidl（Android Interface Definition Language），即Android接口描述语言。
+
+aidl工具解析接口定义文件然后生成相应的.Java代码接口供程序调用。
+
+如果在项目没有使用到aidl文件，则可以跳过这一步。
+
+### **3. 编译项目源代码，生成class文件**
+
+项目中所有的.Java代码，包括*R.java*和*.aidl*文件，都会变Java编译器（javac）编译成*.class*文件，生成的class文件位于工程中的bin/classes目录下。
+
+### **4. 转换所有的class文件，生成classes.dex文件**
+
+dx工具生成可供Android系统Dalvik虚拟机执行的classes.dex文件。
+
+任何第三方的*libraries*和*.class*文件都会被转换成*.dex*文件。
+
+dx工具的主要工作是将Java字节码转成成Dalvik字节码、压缩常量池、消除冗余信息等。
+
+### **5. 打包生成APK文件**
+
+所有没有编译的资源，如images、assets目录下资源（**该类文件是一些原始文件，APP打包时并不会对其进行编译，而是直接打包到APP中，对于这一类资源文件的访问，应用层代码需要通过文件名对其进行访问**）；
+
+编译过的资源和*.dex*文件都会被apkbuilder工具打包到最终的*.apk*文件中。
+
+打包的工具apkbuilder位于 android-sdk/tools目录下。
+
+### **6. 对APK文件进行签名**
+
+一旦APK文件生成，它必须被签名才能被安装在设备上。
+
+在开发过程中，主要用到的就是两种签名的keystore。一种是用于调试的debug.keystore，它主要用于调试，在Eclipse或者Android Studio中直接run以后跑在手机上的就是使用的debug.keystore。
+
+另一种就是用于发布正式版本的keystore。
+
+### **7. 对签名后的APK文件进行对齐处理**
+
+如果你发布的apk是正式版的话，就必须对APK进行对齐处理，用到的工具是zipalign。
+
+对齐的主要过程是将APK包中所有的资源文件距离文件起始偏移为4字节整数倍，这样通过内存映射访问apk文件时的速度会更快。对齐的作用就是减少运行时内存的使用。
+
+
+
+# Android ClassLoader
+
+Android中的ClassLoader是一个抽象类，使用的是：
+
+1. DexClassLoader：可以加载jar/apk/dex，可以从SD卡中加载未安装的apk
+
+2. PathClassLoader：要传入系统中apk的存放Path，所以只能加载已安装的apk文件
+
+**加载过程**：
+
+当前ClassLoader实例是否加载过此类
+
+- 有： 直接返回
+
+- 没有：查询Parent是否已经加载过此类（递归）
+  - 有：返回
+  - 没有：Child执行类的加载
+
+## 细节
+
+1. **一个运行的Android应用至少有2个ClassLoader**：
+   - BootClassLoader（系统启动的时候创建的）
+   - PathClassLoader（应用启动时创建的，用于加载“/data/app/me.kaede.anroidclassloadersample-1/base.apk”里面的类）
+
+# Android虚拟机
+
+| 虚拟机                 | 特点                                                         | 版本            |
+| ---------------------- | ------------------------------------------------------------ | --------------- |
+| Dalvik                 | 即时编译器（JIT，just in time）：执行的时候编译+运行，安装比较快，开启应用比较慢，应用占用空间小 | android 5.0之前 |
+| ART（Android Runtime） | 预编译（AOT，Ahead-Of-Time）：应用在第一次安装的时候，字节码就会预先编译成机器码，占用空间较大（10%-20%） | android 5.0之后 |
+
+Android 7.0，JIT 编译器回归，形成 AOT/JIT 混合编译模式，这种混合编译模式的特点是：
+
+- 应用在安装的时候 dex 不会被编译
+- 应用在运行时 dex 文件先通过解析器（Interpreter）后会被直接执行（这一步骤跟 Android 2.2 - Android 4.4之前的行为一致），与此同时，热点函数（Hot Code）会被识别并被 JIT 编译后存储在 jit code cache 中并生成 profile 文件以记录热点函数的信息。
+- 手机进入 IDLE（空闲） 或者 Charging（充电） 状态的时候，系统会扫描 App 目录下的 profile 文件并执行 AOT 过程进行编译。
+
+
+
+# [AOP思想](https://juejin.im/post/6844904017760370695)
+
+从织入的时机的角度看，可以分为源码阶段、class阶段、dex阶段、运行时织入。
+
+**源码阶段、class阶段、dex织入**，由于他们都发生在class加载到虚拟机前，我们统称为静态织入， 而在运行阶段发生的改动，我们统称为动态织入。
+
+常见的技术框架如下表：
+
+| 织入时机 | 技术框架                      |
+| :------: | ----------------------------- |
+| 静态织入 | APT，AspectJ、ASM、Javassit   |
+| 动态织入 | java动态代理，cglib、Javassit |
+
+静态织入发生在编译器，因此几乎不会对运行时的效率产生影响；动态织入发生在运行期，可直接将字节码写入内存，并通过反射完成类的加载，所以效率相对较低，但更灵活。
+
+动态织入的前提是类还未被加载，你不能将一个已经加载的类经过修改再次加载，这是ClassLoader的限制。但是可以通过另一个ClassLoader进行加载，虚拟机允许两个相同类名的class被不同的ClassLoader加载，在运行时也会被认为是两个不同的类，因此需要注意不能相互赋值， 不然会抛出ClassCastException。
+
+
+
+## APT
+
+**APT**（Annotation Processing Tool）即注解处理器，在Gradle 版本>=2.2后被annotationProcessor取代。
+
+它用来在编译时扫描和处理注解，扫描过程可使用[ auto-service ](https://github.com/google/auto/tree/master/service)来简化寻找注解的配置，在处理过程中可生成java文件（创建java文件通常依赖[ javapoet ](https://github.com/square/javapoet)这个库）。常用于生成一些模板代码或运行时依赖的类文件，比如常见的ButterKnife、Dagger、ARouter，它的优点是简单方便。
+
+APT技术的不足，通常只是用来创建新的类，而不能对原有类进行改动，在不能改动的情况下，只能通过反射实现动态化。
+
+## AspectJ
+
+实现代码织入有两种方式，一是自行编写.ajc文件，二是使用AspectJ提供的@Aspect、@Pointcut等注解，二者最终都是通过ajc编译器完成代码的织入。
+
+**使用：**
+
+- @Aspect 用它声明一个类，表示一个需要执行的切面。
+- @Pointcut 声明一个切点。
+- @Before/@After/@Around/...（统称为Advice类型） 声明在切点前、后、中执行切面代码。
+
+**存在的问题：**
+
+1. 重复织入、不织入
+
+   假如想对Activity生命周期织入埋点统计，我们可能写出这样的切点代码。
+
+   ```java
+   @Pointcut("execution(* android.app.Activity+.on*(..))")
+   public void callMethod() {}
+   ```
+
+   由于Activity.class不参与打包（android.jar位于android设备内），参与打包是那些支持库比如support-v7中的AppCompatActivity，还有项目里定义的Activity，这就导致：
+
+   1. 如果业务Activity中如果没有复写生命周期方法将不会织入。
+   2. 如果的Activity继承树上如果都复写了生命周期方法，那么继承树上的所有Activity都会织入统计代码，这会导致重复统计。
+
+   解决办法是项目内定义一个基类Activity（比如BaseActivity），然后复写所有生命周期方法，然后将切点代码精确到这个BaseActivity。
+
+   ```java
+   @Pointcut("execution(* com.xxx.BaseActivity.on*(..))")
+   public void callMethod() {}
+   ```
+
+   但如果真这样做的话，你肯定会反问还需要AspectJ做什么...
+
+2. 出问题难排查
+
+   这是AOP技术的实现方式决定的，修改字节码过程，对上层应用无感知，容易将问题隐藏，排查难度大。因此如果项目中使用了AOP技术应当完善文档，并知会协同开发人员。
+
+3. 编译时间变长
+
+   Transform过程，会遍历所有class文件，查找符合需求的切入点，然后插入字节码。如果项目较大且织入代码较多，会增加十几秒左右的编译时间。
+
+   如前文提到的，有两种办法解决这个问题：
+
+   1. 使用exclude过滤掉不需要执行织入的包名。
+   2. 如果织入代码在debug环境不需要织入，比如埋点，则使用enabled false 关闭AspectJ功能。
+
+4. 兼容性
+
+   如果使用的三方库也使用了AspectJ，可能导致未知的风险。
+
+   比如sample项目中同时使用Hugo，会导致工程中的class不会被打入APK中，运行时会出现ClassNotFoundException。这可能是Hugo项目编写的Plugin插件与Hujiang的AspectJX插件有冲突导致的。
+
+[Android 函数耗时统计工具之Hugo](https://juejin.im/post/6844903945186476040)
+
+## ASM
+
+ASM是一个字节码操作框架，可用来动态生成字节码或者对现有的类进行增强。ASM可以直接生成二进制的class字节码，也可以在class被加载进虚拟机前动态改变其行为，比如方法执行前后插入代码，添加成员变量，修改父类，添加接口等等。
+
+> Matrix是微信开源的一个APM框架，其中TraceCanary子模块用于监测帧率低、卡顿、ANR等场景，具备函数耗时统计的功能。
+>
+> 为了实现函数的耗时统计，通常的做法都是在函数执行开始和结束为止进行插桩，最后以两个插桩点的时间差为函数的执行时间。
+
+**ASM优点：**
+
+- 由于直接操作的是字节码，因此相比其他框架效率更高。
+- 从ASM5开始已经支持Java8的部分语法，比如lamabda表达式。
+- 因为ASM偏向底层，很多其他的上层框架也以ASM作为其底层操作字节码的技术栈，比如Groovy、cglib。
+
+**ASM不足：**
+
+1. 过滤类和方法需要硬编码，且不够灵活，需要对插件进行二次封装，而在AspectJ中已经封装好了切面表达式。
+2. 很难实现在方法调用前后织入新的代码，而在AspectJ中一个call关键字就解决了。
+3. 如果需要在指定的类，指定的方法中织入代码，需要编写相应的过滤条件，这也是相比于AspectJ而言不太方便的地方，AspectJ可通过声明切面注解完成精准的织入。
+
+
+
+## javassit
+
+javassit是一个开源的字节码创建、编辑类库，现属于Jboss web容器的一个子模块，特点是简单、快速，与AspectJ一样，使用它不需要了解字节码和虚拟机指令，这里是[官方文档](https://www.javassist.org/tutorial/tutorial.html)。
+
+javassit核心的类库包含ClassPool，CtClass ，CtMethod和CtField。
+
+- ClassPool：一个基于HashMap实现的CtClass对象容器。
+- CtClass：表示一个类，可从ClassPool中通过完整类名获取。
+- CtMethods：表示类中的方法。
+- CtFields ：表示类中的字段。
+
+## 总结
+
+| 技术框架     | 特点                                                         | 开发难度 | 优势                                                     | 不足                                       |
+| ------------ | ------------------------------------------------------------ | -------- | -------------------------------------------------------- | ------------------------------------------ |
+| APT          | 常用于通过注解减少模板代码，对类的创建于增强需要依赖其他框架。 | ★★       | 开发注解简化上层编码。                                   | 使用注解对原工程具有侵入性。               |
+| AspectJ      | 提供完整的面向切面编程的注解。                               | ★★       | 真正意义的AOP，支持通配、继承结构的AOP，无需硬编码切面。 | 重复织入、不织入问题                       |
+| ASM          | 面向字节码指令编程，功能强大。                               | ★★★      | 高效，ASM5开始支持java8。                                | 切面能力不足，部分场景需硬编码。           |
+| Javassit     | API简洁易懂，快速开发。                                      | ★        | 上手快，新人友好，具备运行时加载class能力。              | 切点代码编写需注意class path加载问题。     |
+| java动态代理 | 运行时扩展代理接口功能。                                     | ★        | 运行时动态增强。                                         | 仅支持代理接口，扩展性差，使用反射性能差。 |
+
+
+
+# 热修复
+
+## 方案对比
+
+![](https://img1.imgtp.com/2023/09/14/x6GFj3tp.jpg)
+
+## 微博使用-Robust
+
+[参考链接1](https://zhuanlan.zhihu.com/p/630582550)
+
+[参考链接2](https://tech.meituan.com/2016/09/14/android-robust.html)
+
+大致流程图：
+
+![](https://awps-assets.meituan.net/mit-x/blog-images-bundle-2016/286c9718.png)
+
+
+
+### 打包阶段
+
+自定义Transform，使用字节码操作工具 （robust使用了 javaassit 和 ASM 框架），在每个方法前插入一段类型为ChangeQuickRedirect的静态变量。
+
+![](https://img1.imgtp.com/2023/09/14/flo9GRtT.png)
+
+
+
+
+
+### 生成补丁
+
+补丁包主要类文件：
+
+- PatchesInfoImpl
+
+
+- xxxPatchControl
+
+
+- xxxPatch
+
+![](https://img1.imgtp.com/2023/09/14/oHsUBm7j.png)
+
+### 加载补丁
+
+1. 开启一个子线程到指定路径去读 patch 包。
+2. 读取补丁包后，新建 DexClassLoader 去加载补丁 dex 文件。
+3. 反射得到 PatchesInfoImpl.class，并创建其对象。
+4. 调用 getPatchedClassesInfo( ) 方法得到需要补丁的类信息。
+5. 根据信息反射拿到每个修改类在当前环境中的的 class。
+6. 反射修改 class 里类型为 ChangeQuickRedirect 的静态变量，将其修改为 xxxPatchControl 这个类new出来的对象。
+
+### 特殊处理
+
+#### 混淆
+
+先针对混淆前的代码生成patch.class，然后利用生成release包时对应的mapping文件中的class的映射关系，对patch.class做字符串上的处理，让它使用线上运行环境中混淆的class。
+
+#### this
+
+原因：在补丁的xxPatch类中，this指代的是xxPatch类对象本身，而过程中实际想要的对象是被补丁类的对象
+
+处理：补丁的xxPatch类构造方法中，传递xx类对象。出现this时，使用xx类对象调用。
+
+#### super
+
+原因： 在Java中super是个关键字，也无法通过别的对象来访问到。
+
+通过对class文件做分析，发现普通的函数调用是使用JVM指令集的invokevirtual指令，而super.onCreate的调用使用的是invokesuper指令，
+
+处理：
+
+1. 使用Smali（Android逆向工具，dex文件反编译之后就是Smali代码，Smali语言是Android虚拟机的反汇编语言）修改指令为invokesuper指令。
+
+2. 补丁类也要继承自xx类的父类，否则会报错找不到该方法。
+
+#### 内联
+
+如果线上包中不存在（上次构建过程中被移除或者被内联），补丁生成阶段需要当做新增类/方法加进来
+
+#### 可见性
+
+如果线上包中不可以被外部访问（上次构建过程中 public 被改为 private），补丁生成阶段需要将直接调用改成反射调用
+
+### 优化
+
+**自动补丁 - generatPatch流程**：
+
+1. 识别被优化过的代码
+
+   调用InlineClassFactory.dealInLineClass(...)方法识别被优化过的方法并记录缓存；
+
+   这里的优化是泛指，包括被优化、内联、新增过的类和方法。具体的逻辑为扫描修改后的类和方法，如果这些类和方法不在 mapping 文件中存在，那么可以定义为被优化过；
+
+2. 识别分析是否包含super方法
+   initSuperMethodInClass() 负责，分析所有需要修改的类及方法是否含有super信息，并缓存记录；
+
+3. 生成 xxxPatch 类
+   调用 PatchesFactory.createPatch 反射翻译修改后的代码，生成xxxPatch类
+   是整个自动化流程最核心的地方 （处理 this, super, 内联等具体逻辑）
+
+4. 生成 xxxPatchControl 类
+
+5. 生成 PatchInfoImpl 类
+
+**增加包大小及潜在的66536问题**
+
+1. robust.xml中的一些开关选项 （可指定需要/不需要插桩的类名）
+2. 规避接口和无方法类
+3. 规避抽象方法
+4. 规避native方法
+5. 规避接口及简单方法（set / get / 1行代码）
+
+### 微博的针对的修改
+
+1. 微博修复so 
+   hook DexPatchList 的 nativeLibraryDirectories对象。
+
+2. 微博修复资源文件
+   替换ResourcesManager中所有Resources对象中AssetManager
 
