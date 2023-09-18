@@ -1,8 +1,6 @@
 Android 优化相关
 
-[toc]
-
-
+[TOC]
 
 # 布局优化
 
@@ -15,9 +13,14 @@ Android 优化相关
 优化的方向：
 
 1. 减少嵌套层级、去除没必要的背景，避免过度绘制
-2. 自定义控件View优化：使用 clipRect() 、 quickReject()，减少全局绘制
-3. 使用ViewStub、merge 标签
-4. 硬件加速
+
+2. 使用ViewStub、merge 标签
+
+3. 自定义控件View优化：使用 clipRect() 、 quickReject()，减少全局绘制
+
+4. 自定义View，避免在 Draw 中频繁创建对象、做耗时操作
+
+   
 
 
 
@@ -32,7 +35,7 @@ Android 优化相关
 | WebView                   | Context 引用泄漏                     | 使用Application Context，并且及时销毁回收 |
 | Bitmap                    | 持有Activity等销毁对象的引用         | 使用后recycle                             |
 | 动画                      | 界面销毁，动画未取消                 | 销毁时停止动画                            |
-| 流                        | 使用后未及时关闭                     | 使用完及时关闭                            |
+| IO流                      | 使用后未及时关闭                     | 使用完及时关闭                            |
 | ContentProvider、数据库   | Cursor 未Close                       | 及时关闭Cursor                            |
 | EditText的TextWatcher等   | Edittext引用                         | 及时remove                                |
 | Activity.getSystemService | Context 引用泄漏                     | 使用Application Context                   |
@@ -51,12 +54,17 @@ Android 优化相关
 
 3. LeakCanary
 
-前两个都是可视化的，当时一般的时候，我们用 LeakCanary 来检测内存泄漏，原理是
+   原理：
 
-1. 初始化：直接debugImplementation就能实现，他是在 ContentProvider里面做的初始化，当打包的时候，会合并各个清单文件。里面注册的 ContentProvider，ContentProvider 会在 Application的 attachBaseContext 之后， onCreate之前创建。
-2. 引用队列可以配合软引用、弱引用及虚引用使用，引用的对象将要被JVM回收时，会将其加入到引用队列中。
-3. 注册 Application.ActivityLifecycleCallbacks 监听Activity的生命周期，以及 fragmentManager.registerFragmentLifecycleCallbacks监听Fragment的生命周期。
-4. 比如监听 onActivityDestroyed方法，当监听到这个方法调用的时候，把Activity 全部放到观察数组中，并且用引用队列包裹这个activity，生成key（UUID），然后过5s，看看引用队列里面有没有这个key，如果有，证明回收了，然后把观察数组中的remove掉这个key，此时如果这个数组里面的count > 0 ，证明有可能是怀疑的泄漏，然后 调用 Runtime.getRuntime().gc()，之后再 看看 引用队列有没有这个数据，如果有，然后把观察数组中的remove掉这个key，之后再看观察数组中的count，如果小于5，只是提示一下。如果count 大于 5 （防止卡顿），就开始使用 shark （2.0之前是haha）分析堆栈信息。用可达到性分析，找到最短的链路，
+   ​		通过弱引用和引用队列监控对象是否被回收
+
+   具体实现：
+
+   1. 初始化：直接debugImplementation就能实现，他是在 ContentProvider里面做的初始化，当打包的时候，会合并各个清单文件。里面注册的 ContentProvider，ContentProvider 会在 Application的 attachBaseContext 之后， onCreate之前创建。
+
+   2. 引用队列可以配合软引用、弱引用及虚引用使用，引用的对象将要被JVM回收时，会将其加入到引用队列中。
+   3. 注册 Application.ActivityLifecycleCallbacks 监听Activity的生命周期，以及 fragmentManager.registerFragmentLifecycleCallbacks监听Fragment的生命周期。
+   4. 比如监听 onActivityDestroyed方法，当监听到这个方法调用的时候，把Activity 全部放到观察数组中，并且用引用队列包裹这个activity，生成key（UUID），然后过5s，看看引用队列里面有没有这个key，如果有，证明回收了，然后把观察数组中的remove掉这个key，此时如果这个数组里面的count > 0 ，证明有可能是怀疑的泄漏，然后 调用 Runtime.getRuntime().gc()，之后再 看看 引用队列有没有这个数据，如果有，然后把观察数组中的remove掉这个key，之后再看观察数组中的count，如果小于5，只是提示一下。如果count 大于 5 （防止卡顿），就开始使用 shark （2.0之前是haha）分析堆栈信息。用可达到性分析，找到最短的链路，
 
 ## 优化的方向和策略
 
@@ -153,6 +161,31 @@ Android 5.0以下，ClassLoader加载类的时候只会从class.dex（主dex）�
 | 第三方库懒加载             | 很多第三方开源库都说在Application中进行初始化，十几个开源库都放在Application中，肯定对冷启动会有影响，所以可以考虑按需初始化，例如Glide，可以放在自己封装的图片加载类中，调用到再初始化，其它库也是同理，让Application变得更轻。 |
 | WebView启动优化            | WebView第一次创建比较耗时，可以预先创建WebView，提前将其内核初始化。 <br />使用WebView缓存池，用到WebView的地方都从缓存池取，缓存池中没有缓存再创建，注意内存泄漏问题。<br /> 本地预置html和css，WebView创建的时候先预加载本地html，之后通过js脚本填充内容部分。 |
 | 数据预加载                 | 这种方式一般是在主页空闲的时候，将其它页面的数据加载好，保存到内存或数据库，等到打开该页面的时候，判断已经预加载过，直接从内存或数据库读取数据并显示。 |
+
+
+
+# 网络优化
+
+速度：
+
+- GZIP 压缩（okhttp 自动支持）
+- Protocol Buffer 替代 json
+- 优化图片/文件流量
+- IP 直连省去 DNS 解析时间
+
+成功率：
+
+- 失败重试机制
+
+流量：
+
+- GZIP 压缩（okhttp 自动支持）
+- Protocol Buffer 替代 json
+- 优化图片/文件流量
+- 断点续传
+- 缓存
+
+
 
 # APK瘦身
 

@@ -1345,8 +1345,8 @@ Android中的ClassLoader是一个抽象类，使用的是：
 
 | 虚拟机                 | 特点                                                         | 版本            |
 | ---------------------- | ------------------------------------------------------------ | --------------- |
-| Dalvik                 | 即时编译器（JIT，just in time）：执行的时候编译+运行，安装比较快，开启应用比较慢，应用占用空间小 | android 5.0之前 |
-| ART（Android Runtime） | 预编译（AOT，Ahead-Of-Time）：应用在第一次安装的时候，字节码就会预先编译成机器码，占用空间较大（10%-20%） | android 5.0之后 |
+| Dalvik                 | 即时编译器（JIT，just in time，静态 编译）：执行的时候编译+运行，安装比较快，开启应用比较慢，应用占用空间小。当程序需要支持动态链接时，只能使用JIT | android 5.0之前 |
+| ART（Android Runtime） | 预编译（AOT，Ahead-Of-Time，动态编译）：应用在第一次安装的时候，字节码就会预先编译成机器码，占用空间较大（10%-20%） | android 5.0之后 |
 
 Android 7.0，JIT 编译器回归，形成 AOT/JIT 混合编译模式，这种混合编译模式的特点是：
 
@@ -1484,6 +1484,78 @@ javassit核心的类库包含ClassPool，CtClass ，CtMethod和CtField。
 
 
 
+# MultiDex分包
+
+## 原因
+
+单个**Dex**文件内可以包含的方法引用数不能超过65536，2^16 = 64Kb
+
+## 版本问题
+
+-  Android 5.0之前：使用Dalvik，有2种方式：
+   1. Application继承**MultiDexApplication**
+   2. Application `attachBaseContext()`中调用 `MultiDex.install(this);`
+-  Android 5.0之后：使用ART，支持从APK文件中加载多个Dex文件
+
+## 原理
+
+1. 分包
+
+   在编译期借助 dx 和 mainDexClasses 等脚本，确定主 Dex（仅包含入口类和引用类）和其他 Dex 的具体字节码组成，并且生成对应文件的过程
+
+2. 加载
+
+   1. 通过反射调用使得当前加载了主Dex文件的ClassLoader
+   2. 使用ClassLoader加载其余Dex文件
+
+   > 在Android中的具体流程：
+   >
+   > 1、 安装完app点击图标之后，系统没有发现对应的process，于是从该apk抽取classes.dex(主dex) 加载，触发 一次dexopt。
+   >
+   > 2. App 的laucherActivity准备启动 ，触发Application启动， Application的 onattach（）方法调用，这时候MultiDex.install（）调用，classes2.dex 被install，再次触发dexopt。
+   >
+   > 3. Applicaition onCreate（）执行。然后 launcher Activity真的起来了。
+
+## 局限
+
+1. 加载时，有很多IO操作，容易出现ANR问题，分包不能过大，
+2. 影响启动速度
+3. 使用了mulitDex的App有可能在4.0(api level 14)以前的机器上无法启动，因为Dalvik linearAlloc bug
+
+## 优化方案
+
+[参考链接](https://www.jianshu.com/p/a5353748159f)
+
+1. 自定义分包脚本（复杂）
+
+   buildTools提供默认分包dex大小，主dex的大小：8M 以及secondary.dex 3M
+
+   工作逻辑：
+
+   1. 先依据manifest里注册的组件生成一个 main-list
+   2. 把这list里的classes所依赖的classes找出来，打成classes.dex就是主dex
+   3. 剩下的classes都放clsses2.dex(如果使用参数限制dex大小的话可能会有classe3.dex 等等）
+
+   
+
+   **实现阻碍**：
+
+   - 实现复杂：需要自定义脚本实现。
+
+   - 梳理工程大：由于历史客观原因，项目在维护的App的manifest注册的组件的那些类，承载业务太多，导致直接依赖类非常多，而且短时间内无法梳理精简，没办法mini化主dex。
+
+   - 启动入口较多：Appication初始化未必是由launcher Activity的启动触发，还有可能是因为Service ，Receiver ，ContentProvider 的启动。 靠拦截重写Instrumentation execStartActivity 解决不了问题。要为 Service ，Receiver ，ContentProvider 分别写基类，然后在oncreate()里判断是否要异步加载secondary.dex。
+
+2. 单独开启线程对MultiDex进行初始化，在通常在闪屏页开启，初始化完成后进去主页面；
+
+3. 单独开启进程并创建临时文件，初始化完成后删除临时文件并finish辅助进程，主进程会轮询临时文件是否存在，删除则进入主页面。（这个也是头条的方案，实际上头条还对MultiDex中多余的一次zip压缩进行了优化）
+
+   
+
+
+
+
+
 # 热修复
 
 ## 方案对比
@@ -1603,4 +1675,3 @@ javassit核心的类库包含ClassPool，CtClass ，CtMethod和CtField。
 
 2. 微博修复资源文件
    替换ResourcesManager中所有Resources对象中AssetManager
-

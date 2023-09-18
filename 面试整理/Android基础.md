@@ -300,6 +300,8 @@ MeasureSpec表示的是一个32位的整型值：
 1. 出于效率、简化绘制流程，ViewGroup 默认会绕过 draw() 方法，换而直接执行 dispatchDraw()。如果需要在ViewGroup中绘制内容，需要调用 **View.setWillNotDraw(false)** 这行代码来切换到完整的绘制流程（有些 ViewGroup 是已经调用过 setWillNotDraw(false) 了的，例如 ScrollView）。
 2. 绘制代码优先写在 onDraw() ，onDraw方法中可以在不需要重绘的时候自动跳过重复执行，以提升开发效率。
 
+#### 重绘
+
 ### View 的事件分发
 
 #### 发起
@@ -379,6 +381,27 @@ requestDisallowInterceptTouchEvent：
 3. 如果是ViewGroup的话则会对子 View 遍历并重复以上步骤，然后 add 到父 View 中；
 
 **与之相关的几个方法：inflate ——》 rInflate ——》 createViewFromTag ——》 createView ；**
+
+
+
+------
+
+## SurfaceView、TextureView
+
+SurfaceView：
+
+- 独立于视图层次（View Hierarchy），拥有自己的绘图层（Surface）
+- 子线程中更新 UI 的 View，且不会影响到主线程
+- 双缓冲机制（两个绘图层）：绘制发生在后台画布上，并通过交换前后台画布来刷新画面，可避免局部刷新带来的闪烁，也提高了渲染效率
+- 各个回调发生在主线程。
+
+| SurfaceView | SurfaceView | TextureView |
+| ----------- | ----------- | ----------- |
+| 内存        | 较低        | 较高        |
+| 绘制        | 及时        | 1-3 帧延迟  |
+| 耗电        | 较低        | 较高        |
+| 动画和截图  | 不支持      | 支持        |
+| 硬件加速    | 可选项      | 必须开启    |
 
 
 
@@ -813,3 +836,94 @@ Binder 优势：
 - 安全性更好：传统 IPC 形式，无法得到对方的身份标识（UID/GID)，而在使用 Binder IPC 时，这些身份标示是跟随调用过程而自动传递的。Server 端很容易就可以知道 Client 端的身份，非常便于做安全检查
 
 [一次Binder通信最大可以传输多大的数据](https://www.jianshu.com/p/ea4fc6aefaa8) ： 1MB-8KB（PS：8k是两个pagesize，一个pagesize是申请物理内存的最小单元），
+
+
+
+## ANR
+
+发生时机：
+
+- **InputDispatching Timeout**：5秒内无法响应屏幕触摸事件或键盘输入事件
+- **BroadcastQueue Timeout** ：在执行前台广播（BroadcastReceiver）的`onReceive()`函数时10秒没有处理完成，后台为60秒。
+- **Service Timeout** ：前台服务20秒内，后台服务在200秒内没有执行完毕。
+- **ContentProvider Timeout** ：ContentProvider的publish在10s内没进行完。
+
+ANR监控：[参考链接](https://www.jianshu.com/p/8abce3ff4687)
+
+1. FileObserver监听/data/anr文件夹的变化，代表着ANR的发生。
+   - 所有应用发生ANR的时候都会进行回调，因此需要做一些过滤与判断，如包名、进程号等。
+   - 这种方法在高版本系统中有权限问题
+
+2. ANRWatchDog
+
+   ANRWatchDog继承子Thread，所以它最重要的就是run方法。核心内容可以分为以下几点：
+
+   1. 在run方法中实现无限循环
+
+   2. _tick自动加上5000毫秒并往Handler发消息
+
+   3. 睡眠5000毫秒
+
+   4. 如果5000毫秒之内主线程还没有处理Runnable，将_tick置0，则进入ANR异常。堆栈跟踪
+
+3. 一个进程中只有个Looper对象，Looper 在其loop方法中的死循环中有个mLogging对象，在执行的时候打印了一个Dispatching to日志，执行完成的时候有打印了一个Finished to日志。如：
+
+   ```text
+   public static void loop() {
+   
+          // ....省略开始代码...
+   
+           for (;;) {
+               Message msg = queue.next(); // might block
+               if (msg == null) {
+                   // No message indicates that the message queue is quitting.
+                   return;
+               }
+   
+               // This must be in a local variable, in case a UI event sets the logger
+               final Printer logging = me.mLogging;
+               if (logging != null) {
+                   //重点 开始打印
+                   logging.println(">>>>> Dispatching to " + msg.target + " " +
+                           msg.callback + ": " + msg.what);
+               }
+   
+               // ...省略中间代码...
+   
+               if (logging != null) {
+                   //重点 完成打印
+                   logging.println("<<<<< Finished to " + msg.target + " " + msg.callback);
+               }
+   
+               // ...省略最后代码...
+           }
+       }
+   ```
+
+   所以可以自定义Printer对象，让Handler的日志都通过自定义的Printer进行打印，然后收集日志信息，匹配Dispatching to和Finished to字段，如果在设定的某个时间内只有Dispatching to字段而没有Finished to字段，那么就说明发生了卡顿。发生卡顿后就收集此时的调用栈信息。相反如果两个字段都存在则说明应用运行的很流畅。
+
+   字段Printer设置给mLogging对象：
+
+   ```text
+   Looper.getMainLooper().setMessageLogging(new Printer() {
+       @Override
+       public void println(String log) {
+             Log.e("printer","==println=="+log);
+       }
+   });
+   ```
+
+   代码中的log字段就是需要的Dispatch和Finished字段，我们监测这两个字段并收集调用栈信息将其发送到后端进行分析使用。
+
+   **问题**：
+
+   收集的调用栈信息是最后收集的，这个时候有可能卡顿已经执行完成了，搜集到可能不是卡顿发生的关键信息。
+
+   所以需要高频率的收集日志信息，高频率的收集对后端有一定的压力，而高频收集的信息有很大一部分也是重复的，所以就需要日志去重操作。
+
+## Crash日志
+
+收集方案：基于UncaughtExceptionHandler自定义CrashHandler。三方：bugly，友盟统计。也是基于以上方案来的。
+
+**xLog**：用mmap内存映射，
+
